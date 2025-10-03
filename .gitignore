@@ -1,0 +1,12 @@
+
+# dotenv environment variables file
+.env
+.env.test
+.env.local
+.env.production
+
+
+
+# OS
+.DS_Store
+Thumbs.db 
