@@ -65,7 +65,9 @@ On install- you can deny banning privileges, if desired.
 
 Things to do in your server:
 
-* Create `mod_alerts` channel. This is where the automated alerts will come in.  Make sure that this channel is visible to mods/admins only.
+* Create `mod_alerts` channel. This is where the automated alerts will come in.  Make sure that this channel is visible to mods/admins only. (Add the bot to this channel too :D)
+
+
 * In the role hierarchy, make sure that the banhammer bot is **above** any role that it can ban.
 For example, in the Taostats server, users must have the **verified** role befor ethey can chat.
 In this example, the bot CANNOT ban verified users: it is lower hierarchy:

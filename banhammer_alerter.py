@@ -87,7 +87,6 @@ async def set_autoban_error(ctx, error):
     elif isinstance(error, commands.MissingPermissions):
         await ctx.send("You need **Administrator** permissions to set autoban mode.")
 
-
 #command to get the autoban value
 @bot.command(name="getautoban")
 async def get_autoban(ctx):
@@ -139,6 +138,76 @@ async def search_ban(ctx, user_id: int):
     embed.add_field(name="Ban Time", value=ban_time, inline=False)
     await ctx.send(embed=embed)
 
+#remove user from the banned DB
+#alert all servers that it was removed
+@bot.command(name="removeban")
+@commands.has_permissions(administrator=True)
+async def remove_ban(ctx, user_id: int):
+    """Remove a ban record from the database and alert all servers."""
+
+    async with bot.pg_pool.acquire() as conn:
+        # Check if record exists
+        record = await conn.fetchrow("""
+            SELECT user_id, origin_guild_id, banner_id, reason, ban_time
+            FROM ban_records
+            WHERE user_id = $1
+            ORDER BY ban_time DESC
+            LIMIT 1
+        """, user_id)
+
+        if not record:
+            await ctx.send(f"❌ No ban record found for user ID `{user_id}`.")
+            return
+
+        # Delete all records for that user
+        deleted = await conn.execute("""
+            DELETE FROM ban_records
+            WHERE user_id = $1
+        """, user_id)
+
+    # Notify the command server
+    embed = discord.Embed(
+        title="✅ Ban Record Removed",
+        description=f"User ID `{user_id}` has been removed from the ban database.",
+        color=discord.Color.green(),
+        timestamp=datetime.utcnow()
+    )
+    embed.add_field(name="Deleted Records", value=deleted, inline=False)
+    await ctx.send(embed=embed)
+
+    # --- Broadcast to all servers ---
+    # Customize the alert format as you like
+    alert_embed = discord.Embed(
+        title="🚨 Cross-Server Ban Removal Alert",
+        color=discord.Color.green(),
+        timestamp=datetime.utcnow()
+    )
+
+    user_mention = f"<@{user_id}>"
+    origin_guild_name = "Unknown"
+    if record["origin_guild_id"]:
+        origin_guild = bot.get_guild(record["origin_guild_id"])
+        if origin_guild:
+            origin_guild_name = origin_guild.name
+
+    alert_embed.add_field(name="Unbanned User", value=f"{user_mention} (`{user_id}`)", inline=False)
+    alert_embed.add_field(name="Origin Server", value=origin_guild_name, inline=False)
+    alert_embed.add_field(name="Removed By", value=f"{ctx.author} (`{ctx.author.id}`)", inline=False)
+    alert_embed.set_footer(text="Ban record removed from shared database")
+
+    # Send alert to a specific channel in each server
+    # (replace CHANNEL_ID_HERE with your actual alert channel ID)
+
+    for guild in bot.guilds:
+        # Try to find a channel named "ban-alerts"
+        channel = discord.utils.get(guild.text_channels, name=MOD_CHANNEL_NAME)
+        if channel and channel.permissions_for(guild.me).send_messages:
+            try:
+                await channel.send(embed=alert_embed)
+            except Exception as e:
+                print(f"Failed to send alert to {guild.name}: {e}")
+
+    print(f"✅ Unban alert broadcasted for user {user_id}")
 
 
 # --- Main handler for bans ---
