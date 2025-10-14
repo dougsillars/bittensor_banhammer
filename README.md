@@ -31,6 +31,14 @@ This Discord bot looks to automate this notification - improving the Discord exp
 ```
 !searchban 1289572948994162712
 ```
+
+4. Remove bans
+
+```
+!removeban <userid>
+```
+removes the user - and broadcasts to all servers.
+
 ![alt text](images/image.png)
 
 ## How banhammer works
