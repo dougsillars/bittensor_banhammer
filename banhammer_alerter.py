@@ -1,5 +1,4 @@
 import discord
-from discord import app_commands
 from discord.ext import commands
 import asyncpg
 from datetime import datetime, timezone
@@ -15,9 +14,8 @@ POSTGRES_PASSWORD = os.getenv('postgres_password')
 POSTGRES_DB = "discordbot"
 POSTGRES_HOST = "localhost"
 
-# Admin guild for slash commands
+# Admin guild for !banlist command
 ADMIN_GUILD_ID = 1418032802687094918
-ADMIN_GUILD = discord.Object(id=ADMIN_GUILD_ID)
 
 intents = discord.Intents.default()
 intents.members = True  # needed to check members across servers
@@ -55,16 +53,15 @@ async def on_ready():
             autoban_settings[row['guild_id']] = row['autoban_mode']
     print(f"Loaded {len(autoban_settings)} guild settings into memory.")
 
-    # Sync slash commands to the admin guild
-    bot.tree.copy_global_to(target=ADMIN_GUILD)
-    await bot.tree.sync(guild=ADMIN_GUILD)
-    print(f"Slash commands synced to admin guild {ADMIN_GUILD_ID}")
 
+# --- !banlist command (admin guild only) ---
+@bot.command(name="banlist")
+async def banlist(ctx, *, user_ids: str):
+    """Add a comma-separated list of user IDs to the ban database. Only works in the admin guild."""
+    if ctx.guild.id != ADMIN_GUILD_ID:
+        await ctx.send("This command can only be used in the admin server.")
+        return
 
-# --- Slash command: /banlist (admin guild only) ---
-@bot.tree.command(name="banlist", description="Add a comma-separated list of user IDs to the ban database", guild=ADMIN_GUILD)
-@app_commands.describe(user_ids="Comma-separated list of user IDs to ban")
-async def banlist(interaction: discord.Interaction, user_ids: str):
     # Parse and validate UIDs
     raw_ids = [uid.strip() for uid in user_ids.split(",") if uid.strip()]
     valid_ids = []
@@ -76,10 +73,8 @@ async def banlist(interaction: discord.Interaction, user_ids: str):
             invalid_ids.append(uid)
 
     if not valid_ids:
-        await interaction.response.send_message("No valid user IDs provided.", ephemeral=True)
+        await ctx.send("No valid user IDs provided.")
         return
-
-    await interaction.response.defer(ephemeral=True)
 
     added = []
     skipped = []
@@ -97,7 +92,7 @@ async def banlist(interaction: discord.Interaction, user_ids: str):
                 await conn.execute("""
                     INSERT INTO ban_records (user_id, origin_guild_id, banner_id, reason)
                     VALUES ($1, $2, $3, $4)
-                """, uid, ADMIN_GUILD_ID, interaction.user.id, reason)
+                """, uid, ADMIN_GUILD_ID, ctx.author.id, reason)
                 added.append(uid)
 
     embed = discord.Embed(
@@ -112,8 +107,13 @@ async def banlist(interaction: discord.Interaction, user_ids: str):
         embed.add_field(name="Invalid IDs", value=", ".join(invalid_ids), inline=False)
     embed.set_footer(text=f"Reason: {reason}")
 
-    await interaction.followup.send(embed=embed, ephemeral=True)
-    print(f"/banlist: {len(added)} added, {len(skipped)} skipped by {interaction.user}")
+    await ctx.send(embed=embed)
+    print(f"!banlist: {len(added)} added, {len(skipped)} skipped by {ctx.author}")
+
+@banlist.error
+async def banlist_error(ctx, error):
+    if isinstance(error, commands.MissingRequiredArgument):
+        await ctx.send("Usage: `!banlist uid1, uid2, uid3`")
 
 
 # Helper function to find #mod-alerts channel
