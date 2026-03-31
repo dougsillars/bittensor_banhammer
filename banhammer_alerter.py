@@ -1,4 +1,5 @@
 import discord
+from discord import app_commands
 from discord.ext import commands
 import asyncpg
 from datetime import datetime, timezone
@@ -13,6 +14,10 @@ POSTGRES_USER = os.getenv('postgres_user')
 POSTGRES_PASSWORD = os.getenv('postgres_password')
 POSTGRES_DB = "discordbot"
 POSTGRES_HOST = "localhost"
+
+# Admin guild for slash commands
+ADMIN_GUILD_ID = 1418032802687094918
+ADMIN_GUILD = discord.Object(id=ADMIN_GUILD_ID)
 
 intents = discord.Intents.default()
 intents.members = True  # needed to check members across servers
@@ -50,6 +55,65 @@ async def on_ready():
             autoban_settings[row['guild_id']] = row['autoban_mode']
     print(f"Loaded {len(autoban_settings)} guild settings into memory.")
 
+    # Sync slash commands to the admin guild
+    bot.tree.copy_global_to(target=ADMIN_GUILD)
+    await bot.tree.sync(guild=ADMIN_GUILD)
+    print(f"Slash commands synced to admin guild {ADMIN_GUILD_ID}")
+
+
+# --- Slash command: /banlist (admin guild only) ---
+@bot.tree.command(name="banlist", description="Add a comma-separated list of user IDs to the ban database", guild=ADMIN_GUILD)
+@app_commands.describe(user_ids="Comma-separated list of user IDs to ban")
+async def banlist(interaction: discord.Interaction, user_ids: str):
+    # Parse and validate UIDs
+    raw_ids = [uid.strip() for uid in user_ids.split(",") if uid.strip()]
+    valid_ids = []
+    invalid_ids = []
+    for uid in raw_ids:
+        try:
+            valid_ids.append(int(uid))
+        except ValueError:
+            invalid_ids.append(uid)
+
+    if not valid_ids:
+        await interaction.response.send_message("No valid user IDs provided.", ephemeral=True)
+        return
+
+    await interaction.response.defer(ephemeral=True)
+
+    added = []
+    skipped = []
+    reason = "order of Yuma ban"
+
+    async with bot.pg_pool.acquire() as conn:
+        for uid in valid_ids:
+            exists = await conn.fetchval(
+                "SELECT 1 FROM ban_records WHERE user_id = $1 AND origin_guild_id = $2",
+                uid, ADMIN_GUILD_ID
+            )
+            if exists:
+                skipped.append(uid)
+            else:
+                await conn.execute("""
+                    INSERT INTO ban_records (user_id, origin_guild_id, banner_id, reason)
+                    VALUES ($1, $2, $3, $4)
+                """, uid, ADMIN_GUILD_ID, interaction.user.id, reason)
+                added.append(uid)
+
+    embed = discord.Embed(
+        title="Ban List Processed",
+        color=discord.Color.green(),
+        timestamp=datetime.utcnow()
+    )
+    embed.add_field(name="Added", value=", ".join(str(u) for u in added) if added else "None", inline=False)
+    if skipped:
+        embed.add_field(name="Skipped (already in DB)", value=", ".join(str(u) for u in skipped), inline=False)
+    if invalid_ids:
+        embed.add_field(name="Invalid IDs", value=", ".join(invalid_ids), inline=False)
+    embed.set_footer(text=f"Reason: {reason}")
+
+    await interaction.followup.send(embed=embed, ephemeral=True)
+    print(f"/banlist: {len(added)} added, {len(skipped)} skipped by {interaction.user}")
 
 
 # Helper function to find #mod-alerts channel
